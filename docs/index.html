@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ruang Operasi — Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  /* Layout: top status banner, config bar, 2 gauge/indicator cards,
+     2 history charts below, all on a dark clinical-monitor surface. */
+  :root{
+    --bg:#0b1118;
+    --panel:#121b26;
+    --panel-2:#17222f;
+    --line:#223040;
+    --fg:#e7eef5;
+    --fg-dim:#8fa3b8;
+    --accent:#35c9c1;
+    --ok:#3ddc84;
+    --warn:#ffb648;
+    --crit:#ff5a6e;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--fg);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+    padding-inline:20px;
+    padding-block:20px;
+    min-height:100%;
+  }
+  .mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;}
+
+  .wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+
+  header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  header h1{
+    font-size:1.15rem;
+    font-weight:600;
+    letter-spacing:.02em;
+    margin:0;
+  }
+  header .sub{color:var(--fg-dim);font-size:.8rem;}
+
+  .banner{
+    border-radius:14px;
+    padding:18px 22px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    background:var(--panel);
+    border:1px solid var(--line);
+    transition:background .3s,border-color .3s;
+  }
+  .banner.ok{border-color:color-mix(in srgb, var(--ok) 50%, var(--line));background:color-mix(in srgb, var(--ok) 10%, var(--panel));}
+  .banner.warn{border-color:color-mix(in srgb, var(--warn) 55%, var(--line));background:color-mix(in srgb, var(--warn) 12%, var(--panel));}
+  .banner.crit{border-color:color-mix(in srgb, var(--crit) 55%, var(--line));background:color-mix(in srgb, var(--crit) 14%, var(--panel));}
+  .banner .label{font-size:.72rem;letter-spacing:.12em;color:var(--fg-dim);text-transform:uppercase;}
+  .banner .status-text{font-size:1.5rem;font-weight:700;margin-top:2px;}
+  .banner .status-text.ok{color:var(--ok);}
+  .banner .status-text.warn{color:var(--warn);}
+  .banner .status-text.crit{color:var(--crit);}
+  .conn{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--fg-dim);}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--crit);box-shadow:0 0 0 0 rgba(255,90,110,.6);}
+  .dot.live{background:var(--ok);animation:pulse 1.6s infinite;}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);}
+    70%{box-shadow:0 0 0 8px transparent;}
+    100%{box-shadow:0 0 0 0 transparent;}
+  }
+
+  details.config{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:4px 16px;
+  }
+  details.config summary{
+    cursor:pointer;
+    padding:10px 0;
+    font-size:.82rem;
+    color:var(--fg-dim);
+    letter-spacing:.02em;
+    user-select:none;
+  }
+  .config-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:10px;
+    padding-bottom:14px;
+  }
+  .field{display:flex;flex-direction:column;gap:4px;}
+  .field label{font-size:.7rem;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.08em;}
+  .field input{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--fg);
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:.85rem;
+    font-family:"IBM Plex Mono",monospace;
+  }
+  .field input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  .config-actions{display:flex;gap:8px;align-items:flex-end;padding-bottom:14px;}
+  button{
+    background:var(--accent);
+    color:#06211f;
+    border:none;
+    border-radius:8px;
+    padding:9px 16px;
+    font-weight:600;
+    font-size:.82rem;
+    cursor:pointer;
+  }
+  button.secondary{
+    background:transparent;
+    color:var(--fg-dim);
+    border:1px solid var(--line);
+  }
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  .grid-cards{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:14px;
+  }
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:16px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    min-width:0;
+  }
+  .card h2{
+    margin:0;
+    font-size:.72rem;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--fg-dim);
+    font-weight:600;
+  }
+  .gauge-wrap{display:flex;align-items:center;gap:14px;}
+  .gauge-wrap svg{flex:0 0 auto;}
+  .gauge-readout{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .gauge-readout .val{font-size:1.7rem;font-weight:600;font-family:"IBM Plex Mono",monospace;}
+  .gauge-readout .unit{font-size:.75rem;color:var(--fg-dim);}
+  .gauge-readout .tag{
+    margin-top:4px;
+    display:inline-block;
+    width:fit-content;
+    font-size:.68rem;
+    font-weight:600;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    padding:3px 8px;
+    border-radius:999px;
+  }
+  .tag.ok{background:color-mix(in srgb, var(--ok) 22%, transparent);color:var(--ok);}
+  .tag.warn{background:color-mix(in srgb, var(--warn) 22%, transparent);color:var(--warn);}
+  .tag.crit{background:color-mix(in srgb, var(--crit) 22%, transparent);color:var(--crit);}
+
+  .mini-rows{display:flex;flex-direction:column;gap:6px;font-size:.78rem;}
+  .mini-rows .row{display:flex;justify-content:space-between;color:var(--fg-dim);}
+  .mini-rows .row span.v{color:var(--fg);font-family:"IBM Plex Mono",monospace;}
+
+  .actuators{display:flex;gap:12px;}
+  .led-card{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    padding:14px 10px;
+    border-radius:10px;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+  }
+  .led{
+    width:22px;height:22px;border-radius:50%;
+    background:#2a3542;
+    box-shadow:inset 0 0 0 2px var(--line);
+    transition:background .25s, box-shadow .25s;
+  }
+  .led.on.blower{background:var(--accent);box-shadow:0 0 14px 2px color-mix(in srgb, var(--accent) 70%, transparent);}
+  .led.on.heater{background:var(--warn);box-shadow:0 0 14px 2px color-mix(in srgb, var(--warn) 70%, transparent);}
+  .led-card .name{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim);}
+  .led-card .state{font-size:.85rem;font-weight:600;font-family:"IBM Plex Mono",monospace;}
+
+  .charts{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(380px,1fr));
+    gap:14px;
+  }
+  .chart-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:16px;
+    min-width:0;
+  }
+  .chart-card h2{margin:0 0 10px;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dim);font-weight:600;}
+  .chart-box{height:220px;position:relative;}
+
+  footer{font-size:.72rem;color:var(--fg-dim);text-align:center;padding-top:6px;}
+  footer .ts{font-family:"IBM Plex Mono",monospace;}
+
+  @media (max-width:480px){
+    .gauge-wrap{flex-direction:column;align-items:flex-start;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>RUANG OPERASI — MONITOR TEKANAN &amp; SUHU</h1>
+      <div class="sub">Simulasi IoT · BMP280 (dalam/luar) · Blower + Heater · MQTT real-time</div>
+    </div>
+    <div class="conn">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">Terputus</span>
+    </div>
+  </header>
+
+  <div class="banner ok" id="banner">
+    <div>
+      <div class="label">Status Ruangan</div>
+      <div class="status-text ok" id="bannerText">MENUNGGU DATA...</div>
+    </div>
+    <div class="conn">
+      <span class="label">Update terakhir</span>
+      <span class="mono" id="lastUpdate">—</span>
+    </div>
+  </div>
+
+  <details class="config">
+    <summary>Konfigurasi koneksi MQTT</summary>
+    <div class="config-grid">
+      <div class="field">
+        <label for="brokerUrl">Broker WebSocket URL</label>
+        <input id="brokerUrl" type="text" value="wss://broker.hivemq.com:8884/mqtt">
+      </div>
+      <div class="field">
+        <label for="topic">Topic telemetry</label>
+        <input id="topic" type="text" value="ruangop/opsim01/telemetry">
+      </div>
+      <div class="field">
+        <label for="historyLen">Panjang history (titik data)</label>
+        <input id="historyLen" type="number" min="20" max="600" value="120">
+      </div>
+    </div>
+    <div class="config-actions">
+      <button id="connectBtn" type="button">Hubungkan</button>
+      <button id="disconnectBtn" type="button" class="secondary">Putuskan</button>
+    </div>
+  </details>
+
+  <div class="grid-cards">
+
+    <div class="card">
+      <h2>Delta Tekanan (Dalam − Luar)</h2>
+      <div class="gauge-wrap">
+        <svg id="gaugePressure" width="140" height="90" viewBox="0 0 140 90"></svg>
+        <div class="gauge-readout">
+          <span class="val mono" id="deltaPresVal">—</span>
+          <span class="unit">hPa · target ≥ +2.0, ideal +2.0…+3.0</span>
+          <span class="tag" id="presTag">—</span>
+        </div>
+      </div>
+      <div class="mini-rows">
+        <div class="row"><span>Tekanan dalam</span><span class="v" id="presIn">— hPa</span></div>
+        <div class="row"><span>Tekanan luar</span><span class="v" id="presOut">— hPa</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Delta Suhu (Luar − Dalam)</h2>
+      <div class="gauge-wrap">
+        <svg id="gaugeTemp" width="140" height="90" viewBox="0 0 140 90"></svg>
+        <div class="gauge-readout">
+          <span class="val mono" id="deltaTempVal">—</span>
+          <span class="unit">°C · batas maksimum 5.0 °C</span>
+          <span class="tag" id="tempTag">—</span>
+        </div>
+      </div>
+      <div class="mini-rows">
+        <div class="row"><span>Suhu dalam</span><span class="v" id="tempIn">— °C</span></div>
+        <div class="row"><span>Suhu luar</span><span class="v" id="tempOut">— °C</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Aktuator</h2>
+      <div class="actuators">
+        <div class="led-card">
+          <div class="led blower" id="ledBlower"></div>
+          <div class="name">Blower</div>
+          <div class="state" id="blowerState">OFF</div>
+        </div>
+        <div class="led-card">
+          <div class="led heater" id="ledHeater"></div>
+          <div class="name">Heater</div>
+          <div class="state" id="heaterState">OFF</div>
+        </div>
+      </div>
+      <div class="mini-rows">
+        <div class="row"><span>Pesan diterima</span><span class="v" id="msgCount">0</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="charts">
+    <div class="chart-card">
+      <h2>Riwayat Tekanan</h2>
+      <div class="chart-box"><canvas id="chartPressure"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h2>Riwayat Suhu</h2>
+      <div class="chart-box"><canvas id="chartTemp"></canvas></div>
+    </div>
+  </div>
+
+  <footer>
+    Dashboard tersambung langsung ke broker MQTT via WebSocket dari browser — tidak ada server perantara.
+    <span class="ts" id="clock"></span>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var MIN_DP = 2.0, MAX_DP = 3.0, MAX_DELTA_TEMP = 5.0;
+
+  var state = {
+    client: null,
+    connected: false,
+    msgCount: 0,
+    historyLen: 120,
+    labels: [],
+    presIn: [], presOut: [],
+    tempIn: [], tempOut: []
+  };
+
+  var els = {
+    connDot: document.getElementById('connDot'),
+    connText: document.getElementById('connText'),
+    banner: document.getElementById('banner'),
+    bannerText: document.getElementById('bannerText'),
+    lastUpdate: document.getElementById('lastUpdate'),
+    brokerUrl: document.getElementById('brokerUrl'),
+    topic: document.getElementById('topic'),
+    historyLen: document.getElementById('historyLen'),
+    connectBtn: document.getElementById('connectBtn'),
+    disconnectBtn: document.getElementById('disconnectBtn'),
+    deltaPresVal: document.getElementById('deltaPresVal'),
+    presTag: document.getElementById('presTag'),
+    presIn: document.getElementById('presIn'),
+    presOut: document.getElementById('presOut'),
+    deltaTempVal: document.getElementById('deltaTempVal'),
+    tempTag: document.getElementById('tempTag'),
+    tempIn: document.getElementById('tempIn'),
+    tempOut: document.getElementById('tempOut'),
+    ledBlower: document.getElementById('ledBlower'),
+    blowerState: document.getElementById('blowerState'),
+    ledHeater: document.getElementById('ledHeater'),
+    heaterState: document.getElementById('heaterState'),
+    msgCount: document.getElementById('msgCount'),
+    clock: document.getElementById('clock')
+  };
+
+  // ---------- persist config in localStorage ----------
+  try {
+    var saved = JSON.parse(localStorage.getItem('or-dashboard-config') || '{}');
+    if (saved.brokerUrl) els.brokerUrl.value = saved.brokerUrl;
+    if (saved.topic) els.topic.value = saved.topic;
+    if (saved.historyLen) els.historyLen.value = saved.historyLen;
+  } catch(e) {}
+
+  function saveConfig(){
+    try {
+      localStorage.setItem('or-dashboard-config', JSON.stringify({
+        brokerUrl: els.brokerUrl.value,
+        topic: els.topic.value,
+        historyLen: els.historyLen.value
+      }));
+    } catch(e) {}
+  }
+
+  // ---------- gauges (semicircular SVG) ----------
+  function polarToCartesian(cx, cy, r, angleDeg){
+    var a = (angleDeg - 180) * Math.PI / 180;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  }
+  function arcPath(cx, cy, r, startAngle, endAngle){
+    var s = polarToCartesian(cx, cy, r, startAngle);
+    var e = polarToCartesian(cx, cy, r, endAngle);
+    var largeArc = (endAngle - startAngle) <= 180 ? 0 : 1;
+    return 'M ' + s.x + ' ' + s.y + ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + e.x + ' ' + e.y;
+  }
+
+  function drawGauge(svgEl, zones, min, max, value){
+    var cx = 70, cy = 78, r = 60;
+    svgEl.innerHTML = '';
+    var ns = 'http://www.w3.org/2000/svg';
+
+    zones.forEach(function(z){
+      var a0 = 180 * (z.from - min) / (max - min);
+      var a1 = 180 * (z.to - min) / (max - min);
+      var path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', arcPath(cx, cy, r, a0, a1));
+      path.setAttribute('stroke', z.color);
+      path.setAttribute('stroke-width', '12');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-linecap', 'butt');
+      svgEl.appendChild(path);
+    });
+
+    var clamped = Math.max(min, Math.min(max, value));
+    var needleAngle = 180 * (clamped - min) / (max - min);
+    var tip = polarToCartesian(cx, cy, r - 16, needleAngle);
+    var needle = document.createElementNS(ns, 'line');
+    needle.setAttribute('x1', cx); needle.setAttribute('y1', cy);
+    needle.setAttribute('x2', tip.x); needle.setAttribute('y2', tip.y);
+    needle.setAttribute('stroke', '#e7eef5');
+    needle.setAttribute('stroke-width', '3');
+    needle.setAttribute('stroke-linecap', 'round');
+    svgEl.appendChild(needle);
+
+    var hub = document.createElementNS(ns, 'circle');
+    hub.setAttribute('cx', cx); hub.setAttribute('cy', cy); hub.setAttribute('r', 4);
+    hub.setAttribute('fill', '#e7eef5');
+    svgEl.appendChild(hub);
+  }
+
+  var pressureGaugeEl = document.getElementById('gaugePressure');
+  var tempGaugeEl = document.getElementById('gaugeTemp');
+
+  function updatePressureGauge(dp){
+    // -2 .. +4 hPa window
+    drawGauge(pressureGaugeEl, [
+      { from: -2, to: 0, color: '#ff5a6e' },
+      { from: 0, to: 2.0, color: '#ffb648' },
+      { from: 2.0, to: 3.0, color: '#3ddc84' },
+      { from: 3.0, to: 4, color: '#35c9c1' }
+    ], -2, 4, dp);
+  }
+
+  function updateTempGauge(dt){
+    // -2 .. +8 C window
+    drawGauge(tempGaugeEl, [
+      { from: -2, to: 5.0, color: '#3ddc84' },
+      { from: 5.0, to: 8, color: '#ff5a6e' }
+    ], -2, 8, dt);
+  }
+
+  // ---------- charts ----------
+  Chart.defaults.color = '#8fa3b8';
+  Chart.defaults.borderColor = '#223040';
+  Chart.defaults.font.family = "IBM Plex Mono, monospace";
+
+  function makeChart(ctx, seriesDefs){
+    return new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: seriesDefs.map(function(s){
+        return {
+          label: s.label,
+          data: [],
+          borderColor: s.color,
+          backgroundColor: s.color + '22',
+          fill: s.fill || false,
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 2
+        };
+      }) },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6 } },
+          y: { grid: { color: '#1b2734' } }
+        },
+        plugins: {
+          legend: { labels: { boxWidth: 10, boxHeight: 10 } }
+        }
+      }
+    });
+  }
+
+  var chartPressure = makeChart(document.getElementById('chartPressure'), [
+    { label: 'Dalam', color: '#35c9c1' },
+    { label: 'Luar', color: '#8fa3b8' }
+  ]);
+  var chartTemp = makeChart(document.getElementById('chartTemp'), [
+    { label: 'Dalam', color: '#ffb648' },
+    { label: 'Luar', color: '#8fa3b8' }
+  ]);
+
+  function pushHistory(label, p){
+    state.labels.push(label);
+    state.presIn.push(p.presIn);
+    state.presOut.push(p.presOut);
+    state.tempIn.push(p.tempIn);
+    state.tempOut.push(p.tempOut);
+
+    var max = state.historyLen;
+    if (state.labels.length > max) {
+      state.labels.shift();
+      state.presIn.shift(); state.presOut.shift();
+      state.tempIn.shift(); state.tempOut.shift();
+    }
+
+    chartPressure.data.labels = state.labels;
+    chartPressure.data.datasets[0].data = state.presIn;
+    chartPressure.data.datasets[1].data = state.presOut;
+    chartPressure.update('none');
+
+    chartTemp.data.labels = state.labels;
+    chartTemp.data.datasets[0].data = state.tempIn;
+    chartTemp.data.datasets[1].data = state.tempOut;
+    chartTemp.update('none');
+  }
+
+  // ---------- data handling ----------
+  function setConn(connected){
+    state.connected = connected;
+    els.connDot.classList.toggle('live', connected);
+    els.connText.textContent = connected ? 'Tersambung' : 'Terputus';
+  }
+
+  function classifyPressure(dp){
+    if (dp < 0) return { cls: 'crit', text: 'NEGATIF' };
+    if (dp < MIN_DP) return { cls: 'warn', text: 'RENDAH' };
+    if (dp <= MAX_DP) return { cls: 'ok', text: 'NORMAL' };
+    return { cls: 'warn', text: 'TINGGI' };
+  }
+  function classifyTemp(dt){
+    return dt > MAX_DELTA_TEMP ? { cls: 'crit', text: 'TERLALU PANAS' } : { cls: 'ok', text: 'NORMAL' };
+  }
+
+  function onTelemetry(data){
+    state.msgCount++;
+    els.msgCount.textContent = state.msgCount;
+
+    var now = new Date();
+    var label = now.toLocaleTimeString('id-ID', { hour12:false });
+
+    els.deltaPresVal.textContent = data.deltaPres.toFixed(2) + ' hPa';
+    els.presIn.textContent = data.presIn.toFixed(2) + ' hPa';
+    els.presOut.textContent = data.presOut.toFixed(2) + ' hPa';
+
+    els.deltaTempVal.textContent = data.deltaTemp.toFixed(2) + ' °C';
+    els.tempIn.textContent = data.tempIn.toFixed(2) + ' °C';
+    els.tempOut.textContent = data.tempOut.toFixed(2) + ' °C';
+
+    var pClass = classifyPressure(data.deltaPres);
+    var tClass = classifyTemp(data.deltaTemp);
+
+    els.presTag.textContent = pClass.text;
+    els.presTag.className = 'tag ' + pClass.cls;
+    els.tempTag.textContent = tClass.text;
+    els.tempTag.className = 'tag ' + tClass.cls;
+
+    els.ledBlower.classList.toggle('on', !!data.blower);
+    els.blowerState.textContent = data.blower ? 'ON' : 'OFF';
+    els.ledHeater.classList.toggle('on', !!data.heater);
+    els.heaterState.textContent = data.heater ? 'ON' : 'OFF';
+
+    updatePressureGauge(data.deltaPres);
+    updateTempGauge(data.deltaTemp);
+
+    var overall = pClass.cls === 'crit' || tClass.cls === 'crit' ? 'crit'
+      : (pClass.cls === 'warn' ? 'warn' : 'ok');
+
+    els.banner.className = 'banner ' + overall;
+    els.bannerText.className = 'status-text ' + overall;
+    els.bannerText.textContent =
+      overall === 'ok' ? 'TEKANAN POSITIF — AMAN' :
+      overall === 'warn' ? 'TEKANAN DI LUAR TARGET — BLOWER AKTIF' :
+      'KRITIS — PERIKSA RUANGAN';
+
+    els.lastUpdate.textContent = now.toLocaleTimeString('id-ID', { hour12:false });
+
+    pushHistory(label, data);
+  }
+
+  // ---------- MQTT ----------
+  function connect(){
+    if (state.client) {
+      try { state.client.end(true); } catch(e) {}
+      state.client = null;
+    }
+
+    state.historyLen = Math.max(20, Math.min(600, parseInt(els.historyLen.value, 10) || 120));
+    saveConfig();
+
+    var url = els.brokerUrl.value.trim();
+    var topic = els.topic.value.trim();
+
+    setConn(false);
+    els.connText.textContent = 'Menghubungkan...';
+
+    var client = mqtt.connect(url, {
+      clientId: 'or-dashboard-' + Math.random().toString(16).slice(2, 10),
+      clean: true,
+      connectTimeout: 8000,
+      reconnectPeriod: 4000
+    });
+
+    client.on('connect', function(){
+      setConn(true);
+      client.subscribe(topic, function(err){
+        if (err) {
+          els.connText.textContent = 'Gagal subscribe: ' + err.message;
+        }
+      });
+    });
+
+    client.on('reconnect', function(){
+      els.connText.textContent = 'Menyambung ulang...';
+    });
+
+    client.on('close', function(){
+      setConn(false);
+    });
+
+    client.on('error', function(err){
+      els.connText.textContent = 'Error: ' + (err && err.message ? err.message : err);
+    });
+
+    client.on('message', function(t, payload){
+      try {
+        var data = JSON.parse(payload.toString());
+        onTelemetry(data);
+      } catch(e) {
+        console.warn('Payload tidak valid:', e);
+      }
+    });
+
+    state.client = client;
+  }
+
+  function disconnect(){
+    if (state.client) {
+      state.client.end(true);
+      state.client = null;
+    }
+    setConn(false);
+    els.connText.textContent = 'Terputus';
+  }
+
+  els.connectBtn.addEventListener('click', connect);
+  els.disconnectBtn.addEventListener('click', disconnect);
+
+  // initial gauge draw (neutral)
+  updatePressureGauge(0);
+  updateTempGauge(0);
+
+  // clock
+  setInterval(function(){
+    els.clock.textContent = new Date().toLocaleString('id-ID', { hour12:false });
+  }, 1000);
+
+  // auto-connect on load
+  connect();
+
+})();
+</script>
+</body>
+</html>

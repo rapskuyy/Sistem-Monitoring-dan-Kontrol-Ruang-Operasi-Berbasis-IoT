@@ -2,7 +2,7 @@
 
 Sistem pemantauan dan kontrol mikroklimat ruang operasi berbasis **ESP32** dan **Dual Barometric Sensor (BMP280)**. Sistem ini menjaga tekanan positif ruangan (*positive pressure*) dan kestabilan temperatur untuk mencegah kontaminasi udara luar, serta menyajikan telemetri *real-time* via **MQTT (WebSocket)** ke dashboard visual interaktif.
 
-🔗 **Live Dashboard Demo:** [Buka Web Dashboard](https://<username_github>.github.io/<nama_repo>/)
+🔗 **Live Dashboard Demo:** [Buka Web Dashboard](https://rapskuyy.github.io/Sistem-Monitoring-dan-Kontrol-Ruang-Operasi-Berbasi-IoT/)
 
 ---
 
@@ -40,8 +40,8 @@ ESP32 berkomunikasi dengan kedua modul BMP280 melalui protokol I2C menggunakan p
 | **Broker** | `broker.hivemq.com` |
 | **Port TCP (ESP32)** | `1883` |
 | **Port WebSocket (Dashboard)** | `8884` (WSS / Secure) |
-| **Topik Telemetri** | `ruangop/projectiot01/telemetry` |
-| **Topik Status** | `ruangop/projectiot01/status` |
+| **Topik Telemetri** | `ruangop/<nama_device-anda>/telemetry` |
+| **Topik Status** | `ruangop/<nama_device_anda>/status` |
 | **Interval Pengiriman** | 1000 ms (1 Hz) |
 
 ### Format Payload Telemetri (JSON)
@@ -68,8 +68,8 @@ ESP32 berkomunikasi dengan kedua modul BMP280 melalui protokol I2C menggunakan p
 
 ```plaintext
 .
-├── firmware/
-│   └── esp32_control.ino      # Source code Arduino / ESP32
+├── firmware/OR_Control_MQTT
+│   └── OR_Control_MQTT.ino      # Source code Arduino / ESP32
 ├── docs/
 │   └── index.html             # Dashboard client-side (GitHub Pages)
 └── README.md                  # Dokumentasi proyek

@@ -1,0 +1,94 @@
+{
+  "target": "presIn_hPa",
+  "features": [
+    "tempOut_C",
+    "presOut_hPa",
+    "blower",
+    "heater"
+  ],
+  "best_params": {
+    "max_depth": null,
+    "min_samples_leaf": 5,
+    "n_estimators": 200
+  },
+  "cv_mae": 0.0813320372851188,
+  "results": {
+    "Random Forest": {
+      "semua": {
+        "MAE": 0.10693188647789555,
+        "RMSE": 0.17292411406807132,
+        "R2": 0.9656389162907283
+      },
+      "actual": {
+        "MAE": 0.09287151444771552,
+        "RMSE": 0.13048425510679254,
+        "R2": -8.642386751752708
+      },
+      "scenario": {
+        "MAE": 0.12099225850807556,
+        "RMSE": 0.2068317132880743,
+        "R2": 0.9359346735589836
+      }
+    },
+    "Baseline: rata-rata train": {
+      "semua": {
+        "MAE": 0.8422071788412867,
+        "RMSE": 0.9329043838877388,
+        "R2": -6.908367657287862e-05
+      },
+      "actual": {
+        "MAE": 0.7395287153651452,
+        "RMSE": 0.7407215946964297,
+        "R2": -309.72653183311047
+      },
+      "scenario": {
+        "MAE": 0.9448856423174283,
+        "RMSE": 1.091765862309452,
+        "R2": -0.7850393963747202
+      }
+    },
+    "Baseline: luar + selisih rata-rata per (blower,heater)": {
+      "semua": {
+        "MAE": 0.28235384615382886,
+        "RMSE": 0.3581274913395723,
+        "R2": 0.8526225442368487
+      },
+      "actual": {
+        "MAE": 0.1628917004048054,
+        "RMSE": 0.16728611287482567,
+        "R2": -14.848497848387938
+      },
+      "scenario": {
+        "MAE": 0.4018159919028523,
+        "RMSE": 0.4780438855853947,
+        "R2": 0.657765080630418
+      }
+    }
+  },
+  "importance": [
+    {
+      "feature": "blower",
+      "impurity": 0.818668484106849,
+      "permutation_MAE_naik": 0.5088470446942679,
+      "perm_std": 0.02276653931522362
+    },
+    {
+      "feature": "tempOut_C",
+      "impurity": 0.16935940746253902,
+      "permutation_MAE_naik": 0.35991587572808104,
+      "perm_std": 0.01714659473624674
+    },
+    {
+      "feature": "heater",
+      "impurity": 0.007605311811752648,
+      "permutation_MAE_naik": 0.022993780070769645,
+      "perm_std": 0.0030995564914682396
+    },
+    {
+      "feature": "presOut_hPa",
+      "impurity": 0.0043667966188592625,
+      "permutation_MAE_naik": 0.03284569291111085,
+      "perm_std": 0.003144859102649645
+    }
+  ]
+}

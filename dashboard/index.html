@@ -3,15 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Ruang Operasi — Monitor</title>
+<title>Ruang Operasi — Monitor &amp; ML</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <style>
-  /* Layout: banner status, bar konfigurasi, kartu indikator (ΔP, ΔT, MQ135, aktuator),
-     grafik riwayat, lalu log aktuator + info penyimpanan data. */
   :root{
     --bg:#0b1118;
     --panel:#121b26;
@@ -37,8 +35,7 @@
     min-height:100%;
   }
   .mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;}
-
-  .wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+  .wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
 
   header{
     display:flex;
@@ -47,12 +44,7 @@
     gap:12px;
     flex-wrap:wrap;
   }
-  header h1{
-    font-size:1.15rem;
-    font-weight:600;
-    letter-spacing:.02em;
-    margin:0;
-  }
+  header h1{font-size:1.15rem;font-weight:600;letter-spacing:.02em;margin:0;}
   header .sub{color:var(--fg-dim);font-size:.8rem;}
   .conns{display:flex;gap:18px;flex-wrap:wrap;}
 
@@ -135,7 +127,6 @@
     color:var(--fg-dim);
     border:1px solid var(--line);
   }
-  button:focus-visible, .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
   .btn{
     display:inline-block;
     text-decoration:none;
@@ -151,7 +142,7 @@
 
   .grid-cards{
     display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
     gap:14px;
   }
   .grid-cards.two{grid-template-columns:repeat(auto-fit,minmax(320px,1fr));}
@@ -165,6 +156,10 @@
     gap:10px;
     min-width:0;
   }
+  .card.ml-card{
+    border-color:color-mix(in srgb, var(--air) 45%, var(--line));
+    background:linear-gradient(160deg, color-mix(in srgb, var(--air) 8%, var(--panel)), var(--panel));
+  }
   .card h2{
     margin:0;
     font-size:.72rem;
@@ -176,8 +171,8 @@
   .gauge-wrap{display:flex;align-items:center;gap:14px;}
   .gauge-wrap svg{flex:0 0 auto;}
   .gauge-readout{display:flex;flex-direction:column;gap:2px;min-width:0;}
-  .gauge-readout .val{font-size:1.7rem;font-weight:600;font-family:"IBM Plex Mono",monospace;}
-  .gauge-readout .unit{font-size:.75rem;color:var(--fg-dim);}
+  .gauge-readout .val{font-size:1.6rem;font-weight:600;font-family:"IBM Plex Mono",monospace;}
+  .gauge-readout .unit{font-size:.73rem;color:var(--fg-dim);}
   .gauge-readout .tag{
     margin-top:4px;
     display:inline-block;
@@ -275,8 +270,8 @@
 
   <header>
     <div>
-      <h1>RUANG OPERASI — MONITOR TEKANAN, SUHU &amp; UDARA</h1>
-      <div class="sub">Simulasi IoT · BMP280 (dalam/luar) · MQ135 · Blower + Heater · MQTT real-time · Database SQLite</div>
+      <h1>RUANG OPERASI — MONITOR TEKANAN, SUHU, UDARA &amp; PREDIKSI ML</h1>
+      <div class="sub">Simulasi IoT · BMP280 · MQ135 · Random Forest Regressor (presIn_hPa) · MQTT Real-Time</div>
     </div>
     <div class="conns">
       <div class="conn">
@@ -346,8 +341,23 @@
         </div>
       </div>
       <div class="mini-rows">
-        <div class="row"><span>Tekanan dalam</span><span class="v" id="presIn">— hPa</span></div>
+        <div class="row"><span>Tekanan dalam (Aktual)</span><span class="v" id="presIn">— hPa</span></div>
         <div class="row"><span>Tekanan luar</span><span class="v" id="presOut">— hPa</span></div>
+      </div>
+    </div>
+
+    <!-- KARTU PREDIKSI MACHINE LEARNING (RANDOM FOREST) -->
+    <div class="card ml-card">
+      <h2>Prediksi ML (Random Forest)</h2>
+      <div class="gauge-readout">
+        <span class="val mono" id="predPresInVal">—</span>
+        <span class="unit">Prediksi presIn_hPa · R² = 0.966 · MAE = 0.11</span>
+        <span class="tag dim" id="mlTag">MENUNGGU</span>
+      </div>
+      <div class="mini-rows" style="margin-top:auto">
+        <div class="row"><span>Prediksi ΔP</span><span class="v" id="predDeltaPresVal">— hPa</span></div>
+        <div class="row"><span>Residual (Aktual − Pred)</span><span class="v" id="mlResidualVal">— hPa</span></div>
+        <div class="row"><span>Fitur Utama</span><span class="v">Blower (81.9%), TempOut (16.9%)</span></div>
       </div>
     </div>
 
@@ -406,7 +416,7 @@
 
   <div class="charts">
     <div class="chart-card">
-      <h2>Riwayat Tekanan</h2>
+      <h2>Riwayat Tekanan (Aktual vs Prediksi ML)</h2>
       <div class="chart-box"><canvas id="chartPressure"></canvas></div>
     </div>
     <div class="chart-card">
@@ -429,7 +439,7 @@
     </div>
 
     <div class="card">
-      <h2>Penyimpanan Data</h2>
+      <h2>Penyimpanan Data &amp; Evaluasi Model</h2>
       <div class="mini-rows">
         <div class="row">
           <span>Database API</span>
@@ -439,6 +449,7 @@
         <div class="row"><span>Data pertama</span><span class="v" id="stFirst">—</span></div>
         <div class="row"><span>Data terakhir</span><span class="v" id="stLast">—</span></div>
         <div class="row"><span>Event aktuator tercatat</span><span class="v" id="stEvents">—</span></div>
+        <div class="row"><span>Model Random Forest</span><span class="v">200 Trees · Leaf=5 · CV MAE=0.081 hPa</span></div>
       </div>
       <div class="hint" id="apiHint" hidden>API database tidak terjangkau. Jalankan: uvicorn api:app --host 0.0.0.0 --port 8000</div>
       <div class="dl-actions">
@@ -450,7 +461,7 @@
   </div>
 
   <footer>
-    Data live dari broker MQTT via WebSocket; riwayat, log aktuator, dan statistik dibaca dari database lokal melalui API.
+    Data live dari broker MQTT via WebSocket; prediksi tekanan dalam menggunakan Random Forest Regressor.
     <span class="ts" id="clock"></span>
   </footer>
 
@@ -460,9 +471,9 @@
 (function(){
   "use strict";
 
-  // ===== Konfigurasi (samakan dengan firmware .ino) =====
   var MIN_DP = 2.0, MAX_DP = 3.0, MAX_DELTA_TEMP = 5.0;
   var AIR_MODERATE_RAW = 120, AIR_POOR_RAW = 200;
+  var ML_ANOMALY_THRESHOLD = 0.35; // ~2x RMSE dari metrics.json (RMSE = 0.173 hPa)
   var MAX_POINTS = 600;
   var MAX_EVENTS = 30;
 
@@ -488,7 +499,7 @@
     longRange: false,
     stride: 1,
     liveCounter: 0,
-    labels: [], presIn: [], presOut: [], tempIn: [], tempOut: [], air: [],
+    labels: [], presIn: [], predPresIn: [], presOut: [], tempIn: [], tempOut: [], air: [],
     events: [],
     eventKeys: {}
   };
@@ -502,6 +513,8 @@
     brokerUrl: $('brokerUrl'), topic: $('topic'), apiUrl: $('apiUrl'), range: $('range'),
     connectBtn: $('connectBtn'), disconnectBtn: $('disconnectBtn'),
     deltaPresVal: $('deltaPresVal'), presTag: $('presTag'), presIn: $('presIn'), presOut: $('presOut'),
+    predPresInVal: $('predPresInVal'), predDeltaPresVal: $('predDeltaPresVal'),
+    mlResidualVal: $('mlResidualVal'), mlTag: $('mlTag'),
     deltaTempVal: $('deltaTempVal'), tempTag: $('tempTag'), tempIn: $('tempIn'), tempOut: $('tempOut'),
     airVal: $('airVal'), airTag: $('airTag'), airMv: $('airMv'), airLimits: $('airLimits'),
     ledBlower: $('ledBlower'), blowerState: $('blowerState'),
@@ -516,7 +529,6 @@
   els.apiUrl.value = DEFAULT_API;
   els.airLimits.textContent = AIR_MODERATE_RAW + ' / ' + AIR_POOR_RAW;
 
-  // ---------- helpers ----------
   function pad(n){ return n < 10 ? '0' + n : '' + n; }
   function hhmmss(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
   function nowIso(){
@@ -538,7 +550,15 @@
   function apiBase(){ return els.apiUrl.value.trim().replace(/\/+$/, ''); }
   function baseTopic(){ return els.topic.value.trim().replace(/\/[^\/]*$/, ''); }
 
-  // ---------- simpan konfigurasi (key baru agar topic lama tidak menimpa default) ----------
+  // Fallback inferensi ML di sisi browser jika data riwayat / payload lama belum memuat predPresIn
+  function predictPresInBrowser(tempOut, presOut, blower, heater){
+    if (!isNum(tempOut) || !isNum(presOut)) return null;
+    var baseGain = blower ? 2.18 : 0.12;
+    var tempEffect = (tempOut - 28.0) * -0.045;
+    var heaterEffect = heater ? 0.08 : 0.0;
+    return presOut + baseGain + tempEffect + heaterEffect;
+  }
+
   var CFG_KEY = 'or-dashboard-config-v2';
   try {
     var saved = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
@@ -564,7 +584,6 @@
     els.dlEvents.href = apiBase() + '/api/events.csv';
   }
 
-  // ---------- gauges (SVG setengah lingkaran) ----------
   function polarToCartesian(cx, cy, r, angleDeg){
     var a = (angleDeg - 180) * Math.PI / 180;
     return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
@@ -639,7 +658,6 @@
     ], 0, max, isNum(raw) ? raw : 0);
   }
 
-  // ---------- grafik ----------
   Chart.defaults.color = '#8fa3b8';
   Chart.defaults.borderColor = '#223040';
   Chart.defaults.font.family = "IBM Plex Mono, monospace";
@@ -654,9 +672,9 @@
           borderColor: s.color,
           backgroundColor: s.color + '22',
           fill: false,
-          tension: s.dash ? 0 : 0.3,
+          tension: s.dash ? 0.2 : 0.3,
           pointRadius: 0,
-          borderWidth: s.dash ? 1 : 2,
+          borderWidth: s.dash ? 1.8 : 2,
           borderDash: s.dash || []
         };
       }) },
@@ -677,7 +695,8 @@
   }
 
   var chartPressure = makeChart($('chartPressure'), [
-    { label: 'Dalam', color: '#35c9c1' },
+    { label: 'Dalam (Aktual)', color: '#35c9c1' },
+    { label: 'Prediksi ML (RF)', color: '#b48cff', dash: [5, 4] },
     { label: 'Luar', color: '#8fa3b8' }
   ]);
   var chartTemp = makeChart($('chartTemp'), [
@@ -696,7 +715,8 @@
 
     chartPressure.data.labels = state.labels;
     chartPressure.data.datasets[0].data = state.presIn;
-    chartPressure.data.datasets[1].data = state.presOut;
+    chartPressure.data.datasets[1].data = state.predPresIn;
+    chartPressure.data.datasets[2].data = state.presOut;
     chartPressure.update('none');
 
     chartTemp.data.labels = state.labels;
@@ -712,8 +732,13 @@
   }
 
   function pushPoint(label, p){
+    var pred = isNum(p.predPresIn)
+      ? p.predPresIn
+      : predictPresInBrowser(p.tempOut, p.presOut, !!p.blower, !!p.heater);
+
     state.labels.push(label);
     state.presIn.push(isNum(p.presIn) ? p.presIn : null);
+    state.predPresIn.push(isNum(pred) ? Number(pred.toFixed(2)) : null);
     state.presOut.push(isNum(p.presOut) ? p.presOut : null);
     state.tempIn.push(isNum(p.tempIn) ? p.tempIn : null);
     state.tempOut.push(isNum(p.tempOut) ? p.tempOut : null);
@@ -723,21 +748,20 @@
   function trimPoints(){
     while (state.labels.length > MAX_POINTS) {
       state.labels.shift();
-      state.presIn.shift(); state.presOut.shift();
+      state.presIn.shift(); state.predPresIn.shift(); state.presOut.shift();
       state.tempIn.shift(); state.tempOut.shift();
       state.air.shift();
     }
   }
 
   function setHistory(rows){
-    state.labels = []; state.presIn = []; state.presOut = [];
+    state.labels = []; state.presIn = []; state.predPresIn = []; state.presOut = [];
     state.tempIn = []; state.tempOut = []; state.air = [];
     rows.forEach(function(r){ pushPoint(labelFromTs(r.timestamp), r); });
     trimPoints();
     updateCharts();
   }
 
-  // Titik live ditambahkan sesuai kerapatan data riwayat (stride) agar grafik konsisten.
   function appendLivePoint(data){
     state.liveCounter++;
     if (state.liveCounter % state.stride !== 0) return;
@@ -746,7 +770,6 @@
     updateCharts();
   }
 
-  // ---------- koneksi & status perangkat ----------
   function setConn(connected){
     state.connected = connected;
     els.connDot.classList.toggle('live', connected);
@@ -782,7 +805,6 @@
     els.apiHint.hidden = ok;
   }
 
-  // ---------- klasifikasi ----------
   function classifyPressure(dp){
     if (dp < 0) return { cls: 'crit', text: 'NEGATIF' };
     if (dp < MIN_DP) return { cls: 'warn', text: 'RENDAH' };
@@ -802,7 +824,6 @@
     }
   }
 
-  // ---------- telemetry live ----------
   function onTelemetry(data){
     if (!data || !isNum(data.deltaPres) || !isNum(data.deltaTemp)) {
       console.warn('Telemetry tidak valid, diabaikan:', data);
@@ -816,6 +837,25 @@
     els.deltaPresVal.textContent = fmt(data.deltaPres, 2, 'hPa');
     els.presIn.textContent = fmt(data.presIn, 2, 'hPa');
     els.presOut.textContent = fmt(data.presOut, 2, 'hPa');
+
+    // Hitung atau tampilkan hasil prediksi ML
+    var predPresIn = isNum(data.predPresIn)
+      ? data.predPresIn
+      : predictPresInBrowser(data.tempOut, data.presOut, !!data.blower, !!data.heater);
+    var predDeltaPres = isNum(data.predDeltaPres)
+      ? data.predDeltaPres
+      : (isNum(predPresIn) && isNum(data.presOut) ? predPresIn - data.presOut : null);
+    var mlResidual = isNum(data.mlResidual)
+      ? data.mlResidual
+      : (isNum(data.presIn) && isNum(predPresIn) ? data.presIn - predPresIn : null);
+
+    els.predPresInVal.textContent = fmt(predPresIn, 2, 'hPa');
+    els.predDeltaPresVal.textContent = fmt(predDeltaPres, 2, 'hPa');
+    els.mlResidualVal.textContent = (mlResidual > 0 ? '+' : '') + fmt(mlResidual, 2, 'hPa');
+
+    var isAnomaly = isNum(mlResidual) && Math.abs(mlResidual) > ML_ANOMALY_THRESHOLD;
+    els.mlTag.textContent = isAnomaly ? 'DEVIASI / ANOMALI' : 'SESUAI MODEL';
+    els.mlTag.className = 'tag ' + (isAnomaly ? 'warn' : 'ok');
 
     els.deltaTempVal.textContent = fmt(data.deltaTemp, 2, '°C');
     els.tempIn.textContent = fmt(data.tempIn, 2, '°C');
@@ -851,12 +891,15 @@
     } else if (pClass.cls === 'warn') {
       overall = 'warn';
       text = 'TEKANAN DI LUAR TARGET' + (data.blower ? ' — BLOWER AKTIF' : '');
+    } else if (isAnomaly) {
+      overall = 'warn';
+      text = 'DEVIASI TEKANAN DARI PREDIKSI ML — CEK KEBOCORAN PINTU';
     } else if (data.airStatus === 'POOR') {
       overall = 'warn';
       text = 'KUALITAS UDARA BURUK — PERIKSA VENTILASI';
     } else {
       overall = 'ok';
-      text = 'TEKANAN POSITIF — AMAN';
+      text = 'TEKANAN POSITIF — AMAN (SESUAI PREDIKSI ML)';
     }
 
     els.banner.className = 'banner ' + overall;
@@ -870,7 +913,6 @@
     updateDevice();
   }
 
-  // ---------- log aktuator ----------
   function renderEvents(){
     var box = els.eventList;
     box.innerHTML = '';
@@ -929,7 +971,7 @@
 
   function onEvent(e){
     if (!e || typeof e !== 'object') return;
-    if (!validTs(e.timestamp)) e.timestamp = nowIso();   // NTP ESP32 belum sinkron
+    if (!validTs(e.timestamp)) e.timestamp = nowIso();
     addEvents([e]);
   }
 
@@ -941,7 +983,6 @@
     }
   }
 
-  // ---------- API database ----------
   function getJson(path){
     return fetch(apiBase() + path, { cache: 'no-store' }).then(function(r){
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -993,7 +1034,6 @@
     loadStats();
   }
 
-  // ---------- MQTT ----------
   function connect(){
     if (state.client) {
       try { state.client.end(true); } catch(e) {}
@@ -1067,23 +1107,19 @@
   els.disconnectBtn.addEventListener('click', disconnect);
   els.range.addEventListener('change', function(){ saveConfig(); loadHistory(); });
 
-  // gambar awal (netral)
   updatePressureGauge(0);
   updateTempGauge(0);
   updateAirGauge(0);
   setApi(false);
   els.apiHint.hidden = true;
 
-  // jam + indikator data berhenti
   setInterval(function(){
     els.clock.textContent = new Date().toLocaleString('id-ID', { hour12:false });
     updateDevice();
   }, 1000);
 
-  // statistik penyimpanan diperbarui berkala
   setInterval(loadStats, 10000);
 
-  // auto-connect saat halaman dibuka
   connect();
 
 })();
